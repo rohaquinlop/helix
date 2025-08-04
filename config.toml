@@ -1,0 +1,16 @@
+theme = "catpuccin_mocha"
+
+[editor]
+line-number = "relative"
+mouse = false
+true-color = true
+cursorline = true
+color-modes = true
+
+[editor.cursor-shape]
+insert = "underline"
+normal = "underline"
+select = "underline"
+
+[editor.file-picker]
+hidden = false

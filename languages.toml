@@ -1,0 +1,39 @@
+[language-server.ruff]
+command = "ruff"
+args = ["server"]
+
+[language-server.ruff.config.settings]
+lineLength = 80
+
+[[language]]
+name = "python"
+language-servers = [{name = "pylsp", except-features = ["format"]}, "ruff"]
+auto-format = true
+scope = "source.python"
+
+[language.formatter]
+command = "ruff"
+args = ["format", "-"]
+
+[language-server.pylsp.config.pylsp.plugins]
+ruff.enabled = false
+autopep8.enabled = false
+flake8.enabled = false
+mccabe.enabled = false
+pycodestyle.enabled = false
+pyflakes.enabled = false
+pylint.enabled = false
+yapf.enabled = false
+
+[language-server.rust-analyzer]
+command = "rust-analyzer"
+args = ["--stdio"]
+config = { checkOnSave = {command = "clippy"}, cargo = {allFeatures = true}}
+
+
+[[language]]
+name = "rust"
+scope = "source.rust"
+file-types = ["rs"]
+roots = ["Cargo.toml"]
+language-servers = ["rust-analyzer"]

@@ -27,13 +27,13 @@ yapf.enabled = false
 
 [language-server.rust-analyzer]
 command = "rust-analyzer"
-args = ["--stdio"]
 config = { checkOnSave = {command = "clippy"}, cargo = {allFeatures = true}}
 
 
 [[language]]
 name = "rust"
+auto-format = true
 scope = "source.rust"
 file-types = ["rs"]
-roots = ["Cargo.toml"]
+roots = ["Cargo.toml", "Cargo.lock"]
 language-servers = ["rust-analyzer"]

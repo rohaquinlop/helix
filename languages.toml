@@ -1,3 +1,17 @@
+[language-server.pylsp.config.pylsp.plugins]
+ruff.enabled = false
+autopep8.enabled = false
+flake8.enabled = false
+mccabe.enabled = false
+pycodestyle.enabled = false
+pyflakes.enabled = false
+pylint.enabled = false
+yapf.enabled = false
+
+
+[language-server.toml]
+command = "taplo"
+
 [language-server.ruff]
 command = "ruff"
 args = ["server"]
@@ -10,25 +24,17 @@ name = "python"
 language-servers = [{name = "pylsp", except-features = ["format"]}, "ruff"]
 auto-format = true
 scope = "source.python"
+file-types = ["py"]
+indent = {tab-width = 2, unit = " ", indent-with-tabs = false}
 
 [language.formatter]
 command = "ruff"
 args = ["format", "-"]
 
-[language-server.pylsp.config.pylsp.plugins]
-ruff.enabled = false
-autopep8.enabled = false
-flake8.enabled = false
-mccabe.enabled = false
-pycodestyle.enabled = false
-pyflakes.enabled = false
-pylint.enabled = false
-yapf.enabled = false
 
 [language-server.rust-analyzer]
 command = "rust-analyzer"
 config = { checkOnSave = {command = "clippy"}, cargo = {allFeatures = true}}
-
 
 [[language]]
 name = "rust"
@@ -37,3 +43,26 @@ scope = "source.rust"
 file-types = ["rs"]
 roots = ["Cargo.toml", "Cargo.lock"]
 language-servers = ["rust-analyzer"]
+indent = {tab-width = 2, unit = " "}
+
+[language.auto-pairs]
+'(' = ')'
+'{' = '}'
+'[' = ']'
+'"' = '"'
+'`' = '`'
+'<' = '>'
+
+
+[language-server.clangd]
+command = "clangd"
+
+[[language]]
+name = "c"
+language-servers = ["clangd"]
+auto-format = true
+indent = {tab-width = 2, unit = " "}
+
+[language.formatter]
+command = "clang-format"
+args = ["--style=Google"]

@@ -205,7 +205,7 @@ impl EditorView {
             inline_diagnostic_config,
             config.end_of_line_diagnostics,
         ));
-        let dim_unfocused_text = Self::document_highlight_dim_style(doc, view, theme, &config);
+        let dim_unfocused_text = Self::document_highlight_dim_style(doc, view, theme, &config, editor.dim_enabled);
 
         render_document(
             surface,
@@ -497,8 +497,9 @@ impl EditorView {
         view: &View,
         theme: &Theme,
         config: &helix_view::editor::Config,
+        dim_enabled: bool,
     ) -> Option<Style> {
-        if !config.lsp.auto_document_highlight || !config.lsp.dim_non_highlighted {
+        if !config.lsp.auto_document_highlight || !config.lsp.dim_non_highlighted || !dim_enabled {
             return None;
         }
         if doc

@@ -153,6 +153,8 @@ pub struct Document {
     pub(crate) jump_labels: HashMap<ViewId, Vec<Overlay>>,
     /// LSP document highlights for each view, stored as char ranges.
     pub(crate) document_highlights: HashMap<ViewId, DocumentHighlights>,
+    /// Cached LSP reference locations for navigation within function scope, per view.
+    pub(crate) document_references: HashMap<ViewId, DocumentReferences>,
     /// Set to `true` when the document is updated, reset to `false` on the next inlay hints
     /// update from the LSP
     pub inlay_hints_oudated: bool,
@@ -238,6 +240,15 @@ pub struct DocumentColorSwatches {
 #[derive(Debug, Clone, Default)]
 pub struct DocumentHighlights {
     pub ranges: Vec<std::ops::Range<usize>>,
+}
+
+/// Cached LSP reference locations for navigation within the current function scope.
+#[derive(Debug, Clone, Default)]
+pub struct DocumentReferences {
+    /// Character offset ranges for each reference.
+    pub ranges: Vec<std::ops::Range<usize>>,
+    /// Current index for cycling through references.
+    pub index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -756,6 +767,7 @@ impl Document {
             readonly: false,
             jump_labels: HashMap::new(),
             document_highlights: HashMap::new(),
+            document_references: HashMap::new(),
             color_swatches: None,
             document_links: Vec::new(),
             color_swatch_controller: TaskController::new(),
@@ -2399,6 +2411,33 @@ impl Document {
         self.document_highlight_controllers
             .entry(view_id)
             .or_default()
+    }
+
+    pub fn set_document_references(
+        &mut self,
+        view_id: ViewId,
+        ranges: Vec<std::ops::Range<usize>>,
+    ) {
+        if ranges.is_empty() {
+            self.document_references.remove(&view_id);
+        } else {
+            self.document_references.insert(
+                view_id,
+                DocumentReferences { ranges, index: 0 },
+            );
+        }
+    }
+
+    pub fn clear_document_references(&mut self, view_id: ViewId) {
+        self.document_references.remove(&view_id);
+    }
+
+    pub fn document_references(&self, view_id: ViewId) -> Option<&DocumentReferences> {
+        self.document_references.get(&view_id)
+    }
+
+    pub fn document_references_mut(&mut self, view_id: ViewId) -> Option<&mut DocumentReferences> {
+        self.document_references.get_mut(&view_id)
     }
 
     /// Get the inlay hints for this document and `view_id`.

@@ -14,7 +14,7 @@ use tui::{text::Span, widgets::Row};
 use super::{align_view, push_jump, Align, Context, Editor};
 
 use helix_core::{
-    diagnostic::DiagnosticProvider, syntax::config::LanguageServerFeature,
+    diagnostic::DiagnosticProvider, movement::Direction, syntax::config::LanguageServerFeature,
     text_annotations::InlineAnnotation, Selection, Uri,
 };
 use helix_stdx::path;
@@ -1021,6 +1021,198 @@ pub fn goto_reference(cx: &mut Context) {
                 editor.set_error("No references found.");
             } else {
                 goto_impl(editor, compositor, locations);
+            }
+        };
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
+}
+
+pub fn toggle_dim(cx: &mut Context) {
+    cx.editor.dim_enabled = !cx.editor.dim_enabled;
+    let state = if cx.editor.dim_enabled { "on" } else { "off" };
+    cx.editor.set_status(format!("Dim non-highlighted text: {state}"));
+}
+
+pub fn goto_next_reference(cx: &mut Context) {
+    goto_reference_impl(cx, Direction::Forward)
+}
+
+pub fn goto_prev_reference(cx: &mut Context) {
+    goto_reference_impl(cx, Direction::Backward)
+}
+
+fn goto_reference_impl(cx: &mut Context, direction: Direction) {
+    let view_id = {
+        let (view, _doc) = current_ref!(cx.editor);
+        view.id
+    };
+
+    // If we have cached references, check if cursor is still on same symbol
+    let cache_valid = {
+        let (view, doc) = current_ref!(cx.editor);
+        if let Some(refs) = doc.document_references(view.id) {
+            if !refs.ranges.is_empty() {
+                let text = doc.text().slice(..);
+                let cursor_pos = doc
+                    .selection(view.id)
+                    .primary()
+                    .cursor(text);
+
+                refs.ranges
+                    .iter()
+                    .any(|r| r.start <= cursor_pos && r.end > cursor_pos)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+
+    if cache_valid {
+        // Navigate through cached references
+        let motion = move |editor: &mut Editor| {
+            let (view, doc) = current!(editor);
+            let text = doc.text().slice(..);
+            let cursor_pos = doc
+                .selection(view.id)
+                .primary()
+                .cursor(text);
+
+            let idx = if let Some(refs) = doc.document_references(view.id) {
+                match direction {
+                    Direction::Forward => {
+                        refs.ranges.iter().position(|r| r.start > cursor_pos)
+                            .unwrap_or(0)
+                    }
+                    Direction::Backward => {
+                        refs.ranges.iter().rev().position(|r| r.end < cursor_pos)
+                            .map(|i| refs.ranges.len() - 1 - i)
+                            .unwrap_or(refs.ranges.len() - 1)
+                    }
+                }
+            } else {
+                return;
+            };
+
+            if let Some(refs) = doc.document_references_mut(view.id) {
+                refs.index = idx;
+            }
+
+            let Some((start, end)) = (if let Some(refs) = doc.document_references(view.id) {
+                refs.ranges.get(idx).map(|r| (r.start, r.end))
+            } else {
+                None
+            }) else {
+                return;
+            };
+
+            push_jump(view, doc);
+            doc.set_selection(view.id, Selection::single(start, end));
+            align_view(doc, view, Align::Center);
+        };
+        cx.editor.apply_motion(motion);
+        return;
+    }
+
+    // Cache invalid or empty, clear and refetch from LSP
+    {
+        let doc = doc_mut!(cx.editor);
+        doc.clear_document_references(view_id);
+    }
+
+    // Fetch from LSP
+    let config = cx.editor.config();
+    let (view, doc) = current_ref!(cx.editor);
+    let mut futures: FuturesUnordered<_> = doc
+        .language_servers_with_feature(LanguageServerFeature::GotoReference)
+        .map(|language_server| {
+            let offset_encoding = language_server.offset_encoding();
+            let pos = doc.position(view.id, offset_encoding);
+            let future = language_server
+                .goto_reference(
+                    doc.identifier(),
+                    pos,
+                    config.lsp.goto_reference_include_declaration,
+                    None,
+                )
+                .unwrap();
+            async move { anyhow::Ok((future.await?, offset_encoding)) }
+        })
+        .collect();
+
+    cx.jobs.callback(async move {
+        let mut locations = Vec::new();
+        while let Some(response) = futures.next().await {
+            match response {
+                Ok((lsp_locations, offset_encoding)) => locations.extend(
+                    lsp_locations
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|location| lsp_location_to_location(location, offset_encoding)),
+                ),
+                Err(err) => log::error!("Error requesting references: {err}"),
+            }
+        }
+        let call = move |editor: &mut Editor, _compositor: &mut Compositor| {
+            if locations.is_empty() {
+                editor.set_error("No references found.");
+                return;
+            }
+
+            // Filter to current document and sort by position
+            let (view, doc) = current!(editor);
+            let current_uri = doc.uri().clone();
+            let offset_encoding = doc
+                .language_servers_with_feature(LanguageServerFeature::GotoReference)
+                .next()
+                .map(|ls| ls.offset_encoding())
+                .unwrap_or(OffsetEncoding::Utf8);
+
+            let mut char_ranges: Vec<std::ops::Range<usize>> = locations
+                .into_iter()
+                .filter(|loc| {
+                    current_uri
+                        .as_ref()
+                        .map(|uri| loc.uri == *uri)
+                        .unwrap_or(false)
+                })
+                .filter_map(|loc| {
+                    lsp_range_to_range(doc.text(), loc.range, offset_encoding)
+                        .map(|r| std::ops::Range {
+                            start: r.anchor,
+                            end: r.head,
+                        })
+                })
+                .collect();
+            char_ranges.sort_by_key(|r| r.start);
+
+            if char_ranges.is_empty() {
+                editor.set_error("No references found in current file.");
+                return;
+            }
+
+            doc.set_document_references(view.id, char_ranges.clone());
+
+            // Find first reference after cursor
+            let text = doc.text().slice(..);
+            let cursor_pos = doc.selection(view.id).primary().cursor(text);
+            let idx = match direction {
+                Direction::Forward => {
+                    char_ranges.iter().position(|r| r.start > cursor_pos)
+                        .unwrap_or(0)
+                }
+                Direction::Backward => {
+                    char_ranges.iter().rev().position(|r| r.end < cursor_pos)
+                        .map(|i| char_ranges.len() - 1 - i)
+                        .unwrap_or(char_ranges.len() - 1)
+                }
+            };
+
+            if let Some(range) = char_ranges.get(idx) {
+                push_jump(view, doc);
+                doc.set_selection(view.id, Selection::single(range.start, range.end));
+                align_view(doc, view, Align::Center);
             }
         };
         Ok(Callback::EditorCompositor(Box::new(call)))

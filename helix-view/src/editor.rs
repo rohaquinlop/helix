@@ -1262,6 +1262,10 @@ pub struct Editor {
 
     pub mouse_down_range: Option<Range>,
     pub cursor_cache: CursorCache,
+
+    /// Whether to dim non-highlighted text during LSP document highlights.
+    /// Runtime-only toggle, defaults to true.
+    pub dim_enabled: bool,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1385,6 +1389,7 @@ impl Editor {
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
+            dim_enabled: true,
         }
     }
 

@@ -1075,6 +1075,17 @@ fn yank_main_selection_to_clipboard(
     Ok(())
 }
 
+fn toggle_dim(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    cx.editor.dim_enabled = !cx.editor.dim_enabled;
+    let state = if cx.editor.dim_enabled { "on" } else { "off" };
+    cx.editor.set_status(format!("Dim non-highlighted text: {state}"));
+    Ok(())
+}
+
 fn yank_joined(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
@@ -3720,6 +3731,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         signature: Signature {
             positionals: (1, None),
             raw_after: Some(1),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "toggle-dim",
+        aliases: &[],
+        doc: "Toggle dimming of non-highlighted text during LSP document highlights.",
+        fun: toggle_dim,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
             ..Signature::DEFAULT
         },
     },

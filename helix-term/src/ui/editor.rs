@@ -205,6 +205,8 @@ impl EditorView {
             inline_diagnostic_config,
             config.end_of_line_diagnostics,
         ));
+        let dim_unfocused_text = Self::document_highlight_dim_style(doc, view, theme, &config);
+
         render_document(
             surface,
             inner,
@@ -213,6 +215,7 @@ impl EditorView {
             &text_annotations,
             syntax_highlighter,
             overlays,
+            dim_unfocused_text,
             theme,
             decorations,
         );
@@ -487,6 +490,25 @@ impl EditorView {
             highlight,
             ranges: ranges.to_vec(),
         })
+    }
+
+    fn document_highlight_dim_style(
+        doc: &Document,
+        view: &View,
+        theme: &Theme,
+        config: &helix_view::editor::Config,
+    ) -> Option<Style> {
+        if !config.lsp.auto_document_highlight || !config.lsp.dim_non_highlighted {
+            return None;
+        }
+        if doc
+            .document_highlights(view.id)
+            .is_none_or(|ranges| ranges.is_empty())
+        {
+            return None;
+        }
+
+        Some(theme.get("ui.focus.dim").add_modifier(Modifier::DIM))
     }
 
     pub fn doc_document_link_highlights(

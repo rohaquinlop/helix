@@ -36,6 +36,7 @@ pub fn render_document(
     doc_annotations: &TextAnnotations,
     syntax_highlighter: Option<Highlighter<'_>>,
     overlay_highlights: Vec<syntax::OverlayHighlights>,
+    dim_unfocused_text: Option<Style>,
     theme: &Theme,
     decorations: DecorationManager,
 ) {
@@ -54,6 +55,7 @@ pub fn render_document(
         doc_annotations,
         syntax_highlighter,
         overlay_highlights,
+        dim_unfocused_text,
         theme,
         decorations,
     )
@@ -68,6 +70,7 @@ pub fn render_text(
     text_annotations: &TextAnnotations,
     syntax_highlighter: Option<Highlighter<'_>>,
     overlay_highlights: Vec<syntax::OverlayHighlights>,
+    dim_unfocused_text: Option<Style>,
     theme: &Theme,
     mut decorations: DecorationManager,
 ) {
@@ -149,9 +152,18 @@ pub fn render_text(
                 overlay_style: Style::default(),
             }
         } else {
+            let overlay_style = overlay_highlighter.style;
+            let syntax_style = if dim_unfocused_text.is_some() && overlay_style == Style::default()
+            {
+                syntax_highlighter
+                    .style
+                    .patch(dim_unfocused_text.expect("checked above"))
+            } else {
+                syntax_highlighter.style
+            };
             GraphemeStyle {
-                syntax_style: syntax_highlighter.style,
-                overlay_style: overlay_highlighter.style,
+                syntax_style,
+                overlay_style,
             }
         };
         decorations.decorate_grapheme(renderer, &grapheme);

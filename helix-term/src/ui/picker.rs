@@ -1017,6 +1017,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                 &TextAnnotations::default(),
                 syntax_highlighter,
                 overlay_highlights,
+                None,
                 &cx.editor.theme,
                 decorations,
             );

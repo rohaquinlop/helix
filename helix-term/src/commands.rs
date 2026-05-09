@@ -460,6 +460,7 @@ impl MappableCommand {
         goto_prev_diag, "Goto previous diagnostic",
         goto_next_change, "Goto next change",
         goto_prev_change, "Goto previous change",
+        toggle_diff_preview, "Toggle diff preview for change at cursor",
         goto_first_change, "Goto first change",
         goto_last_change, "Goto last change",
         goto_line_start, "Goto line start",
@@ -4176,6 +4177,68 @@ fn goto_prev_diag(cx: &mut Context) {
 
 fn goto_first_change(cx: &mut Context) {
     goto_first_change_impl(cx, false);
+}
+
+fn diff_hunk_text(text: RopeSlice, start_line: u32, end_line: u32, prefix: char) -> String {
+    if start_line == end_line {
+        return String::new();
+    }
+
+    let start = text.line_to_char(start_line as usize);
+    let end = text.line_to_char(end_line as usize);
+    text.slice(start..end)
+        .lines()
+        .map(|line| format!("{prefix}{line}"))
+        .collect()
+}
+
+fn toggle_diff_preview(cx: &mut Context) {
+    const ID: &str = "diff-preview";
+
+    let (view, doc) = current_ref!(cx.editor);
+    let Some(handle) = doc.diff_handle() else {
+        cx.editor
+            .set_error("Diff is not available in current buffer");
+        return;
+    };
+
+    let text = doc.text().slice(..);
+    let line = doc.selection(view.id).primary().cursor_line(text);
+    let preview = {
+        let diff = handle.load();
+        let Some(hunk_idx) = diff.hunk_at(line as u32, false) else {
+            drop(diff);
+            cx.editor.set_status("No change at cursor");
+            return;
+        };
+
+        let hunk = diff.nth_hunk(hunk_idx);
+        let mut preview = format!(
+            "```diff\n@@ -{},{} +{},{} @@\n",
+            hunk.before.start + 1,
+            hunk.before.end.saturating_sub(hunk.before.start),
+            hunk.after.start + 1,
+            hunk.after.end.saturating_sub(hunk.after.start)
+        );
+        preview.push_str(&diff_hunk_text(
+            diff.diff_base().slice(..),
+            hunk.before.start,
+            hunk.before.end,
+            '-',
+        ));
+        preview.push_str(&diff_hunk_text(text, hunk.after.start, hunk.after.end, '+'));
+        preview.push_str("```");
+        preview
+    };
+
+    let contents = ui::Markdown::new(preview, cx.editor.syn_loader.clone());
+    let popup = Popup::new(ID, contents).auto_close(true);
+
+    cx.callback.push(Box::new(move |compositor, _cx| {
+        if compositor.remove(ID).is_none() {
+            compositor.push(Box::new(popup));
+        }
+    }));
 }
 
 fn goto_last_change(cx: &mut Context) {

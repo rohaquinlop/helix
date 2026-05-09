@@ -291,6 +291,9 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "r" => rename_symbol,
             "h" => select_references_to_symbol_under_cursor,
             "H" => toggle_dim,
+            "v" => { "Version control"
+                "d" => toggle_diff_preview,
+            },
             "c" => toggle_comments,
             "C" => toggle_block_comments,
             "A-c" => toggle_line_comments,

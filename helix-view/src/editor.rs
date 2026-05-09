@@ -330,6 +330,8 @@ pub struct Config {
     pub word_completion: WordCompletion,
     /// Automatic formatting on save. Defaults to true.
     pub auto_format: bool,
+    /// Automatically reload unmodified buffers when their files change on disk. Defaults to true.
+    pub auto_reload: bool,
     /// Default register used for yank/paste. Defaults to '"'
     pub default_yank_register: char,
     /// Automatic save on focus lost and/or after delay.
@@ -1165,6 +1167,7 @@ impl Default for Config {
             path_completion: true,
             word_completion: WordCompletion::default(),
             auto_format: true,
+            auto_reload: true,
             default_yank_register: '"',
             auto_save: AutoSave::default(),
             idle_timeout: Duration::from_millis(250),

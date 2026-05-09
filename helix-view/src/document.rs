@@ -1251,6 +1251,20 @@ impl Document {
         }
     }
 
+    pub fn has_changed_on_disk(&self) -> bool {
+        if self.is_modified() {
+            return false;
+        }
+
+        let Some(path) = self.path() else {
+            return false;
+        };
+
+        path.metadata()
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|mtime| self.last_saved_time < mtime)
+    }
+
     pub fn pickup_last_saved_time(&mut self) {
         self.last_saved_time = match self.path() {
             Some(path) => match path.metadata() {

@@ -14,7 +14,7 @@ use helix_view::{
     graphics::Rect,
     theme,
     tree::Layout,
-    Align, Editor,
+    Align, DocumentId, Editor, ViewId,
 };
 use serde_json::json;
 use tui::backend::Backend;
@@ -570,14 +570,79 @@ impl Application {
         true
     }
 
+    fn reload_changed_documents(&mut self) -> bool {
+        if !self.editor.config().auto_reload {
+            return false;
+        }
+
+        let changed_docs: Vec<(DocumentId, Vec<ViewId>)> = self
+            .editor
+            .documents()
+            .filter(|doc| doc.has_changed_on_disk())
+            .map(|doc| (doc.id(), doc.selections().keys().copied().collect()))
+            .collect();
+
+        if changed_docs.is_empty() {
+            return false;
+        }
+
+        let scrolloff = self.editor.config().scrolloff;
+        let fallback_view_id = view!(self.editor).id;
+        let mut reloaded = 0;
+
+        for (doc_id, mut view_ids) in changed_docs {
+            if view_ids.is_empty() {
+                doc_mut!(self.editor, &doc_id).ensure_view_init(fallback_view_id);
+                view_ids.push(fallback_view_id);
+            }
+
+            let doc = doc_mut!(self.editor, &doc_id);
+            let view = view_mut!(self.editor, view_ids[0]);
+            view.sync_changes(doc);
+
+            match doc.reload(view, &self.editor.diff_providers) {
+                Ok(()) => {
+                    reloaded += 1;
+                    if let Some(path) = doc.path() {
+                        self.editor
+                            .language_servers
+                            .file_event_handler
+                            .file_changed(path.clone());
+                    }
+                }
+                Err(error) => {
+                    self.editor.set_error(error.to_string());
+                    continue;
+                }
+            }
+
+            for view_id in view_ids {
+                let view = view_mut!(self.editor, view_id);
+                if view.doc == doc_id {
+                    view.ensure_cursor_in_view(doc, scrolloff);
+                }
+            }
+        }
+
+        if reloaded > 0 {
+            self.editor.set_status(match reloaded {
+                1 => "reloaded changed file".to_owned(),
+                count => format!("reloaded {count} changed files"),
+            });
+        }
+
+        reloaded > 0
+    }
+
     pub async fn handle_idle_timeout(&mut self) {
+        let reloaded = self.reload_changed_documents();
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
             jobs: &mut self.jobs,
             scroll: None,
         };
         let should_render = self.compositor.handle_event(&Event::IdleTimeout, &mut cx);
-        if should_render || self.editor.needs_redraw {
+        if reloaded || should_render || self.editor.needs_redraw {
             self.render().await;
         }
     }

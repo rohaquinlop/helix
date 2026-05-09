@@ -966,6 +966,120 @@ pub fn goto_definition(cx: &mut Context) {
     );
 }
 
+fn position_in_range(position: lsp::Position, range: lsp::Range) -> bool {
+    range.start <= position && position <= range.end
+}
+
+pub fn goto_definition_or_reference(cx: &mut Context) {
+    let config = cx.editor.config();
+    let (view, doc) = current_ref!(cx.editor);
+    let current_uri = doc.uri();
+
+    let mut definition_futures: FuturesUnordered<_> = doc
+        .language_servers_with_feature(LanguageServerFeature::GotoDefinition)
+        .map(|language_server| {
+            let offset_encoding = language_server.offset_encoding();
+            let pos = doc.position(view.id, offset_encoding);
+            let future = language_server
+                .goto_definition(doc.identifier(), pos, None)
+                .unwrap();
+            async move { anyhow::Ok((future.await?, offset_encoding, pos)) }
+        })
+        .collect();
+
+    let mut reference_futures: FuturesUnordered<_> = doc
+        .language_servers_with_feature(LanguageServerFeature::GotoReference)
+        .map(|language_server| {
+            let offset_encoding = language_server.offset_encoding();
+            let pos = doc.position(view.id, offset_encoding);
+            let future = language_server
+                .goto_reference(
+                    doc.identifier(),
+                    pos,
+                    config.lsp.goto_reference_include_declaration,
+                    None,
+                )
+                .unwrap();
+            async move { anyhow::Ok((future.await?, offset_encoding)) }
+        })
+        .collect();
+
+    cx.jobs.callback(async move {
+        let mut definitions = Vec::new();
+        let mut on_definition = false;
+
+        while let Some(response) = definition_futures.next().await {
+            match response {
+                Ok((response, offset_encoding, pos)) => {
+                    let locations: Vec<_> = match response {
+                        Some(lsp::GotoDefinitionResponse::Scalar(lsp_location)) => {
+                            lsp_location_to_location(lsp_location, offset_encoding)
+                                .into_iter()
+                                .collect()
+                        }
+                        Some(lsp::GotoDefinitionResponse::Array(lsp_locations)) => lsp_locations
+                            .into_iter()
+                            .flat_map(|location| {
+                                lsp_location_to_location(location, offset_encoding)
+                            })
+                            .collect(),
+                        Some(lsp::GotoDefinitionResponse::Link(lsp_locations)) => lsp_locations
+                            .into_iter()
+                            .map(|location_link| {
+                                lsp::Location::new(
+                                    location_link.target_uri,
+                                    location_link.target_range,
+                                )
+                            })
+                            .flat_map(|location| {
+                                lsp_location_to_location(location, offset_encoding)
+                            })
+                            .collect(),
+                        None => Vec::new(),
+                    };
+
+                    on_definition |= current_uri.as_ref().is_some_and(|uri| {
+                        locations.iter().any(|location| {
+                            &location.uri == uri && position_in_range(pos, location.range)
+                        })
+                    });
+                    definitions.extend(locations);
+                }
+                Err(err) => log::error!("Error requesting locations: {err}"),
+            }
+        }
+
+        let mut references = Vec::new();
+        if on_definition {
+            while let Some(response) = reference_futures.next().await {
+                match response {
+                    Ok((lsp_locations, offset_encoding)) => {
+                        references.extend(lsp_locations.into_iter().flatten().flat_map(
+                            |location| lsp_location_to_location(location, offset_encoding),
+                        ))
+                    }
+                    Err(err) => log::error!("Error requesting references: {err}"),
+                }
+            }
+        }
+
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+            if on_definition {
+                if references.is_empty() {
+                    editor.set_error("No references found.");
+                } else {
+                    goto_impl(editor, compositor, references);
+                }
+            } else if definitions.is_empty() {
+                editor.set_error("No definition found.");
+            } else {
+                goto_impl(editor, compositor, definitions);
+            }
+        };
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
+}
+
 pub fn goto_type_definition(cx: &mut Context) {
     goto_single_impl(
         cx,

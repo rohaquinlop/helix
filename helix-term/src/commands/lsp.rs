@@ -1142,9 +1142,16 @@ pub fn goto_reference(cx: &mut Context) {
 }
 
 pub fn toggle_dim(cx: &mut Context) {
-    cx.editor.dim_enabled = !cx.editor.dim_enabled;
-    let state = if cx.editor.dim_enabled { "on" } else { "off" };
-    cx.editor.set_status(format!("Dim non-highlighted text: {state}"));
+    if cx.editor.dim_enabled {
+        cx.editor.dim_enabled = false;
+        cx.editor.set_status("Dim non-highlighted text: off");
+    } else if cx.editor.focus_dim_current_document_highlight() {
+        cx.editor
+            .set_status("Dim non-highlighted text: focused symbol");
+    } else {
+        cx.editor
+            .set_status("No read/write document highlight under cursor");
+    }
 }
 
 pub fn goto_next_reference(cx: &mut Context) {
@@ -1167,10 +1174,7 @@ fn goto_reference_impl(cx: &mut Context, direction: Direction) {
         if let Some(refs) = doc.document_references(view.id) {
             if !refs.ranges.is_empty() {
                 let text = doc.text().slice(..);
-                let cursor_pos = doc
-                    .selection(view.id)
-                    .primary()
-                    .cursor(text);
+                let cursor_pos = doc.selection(view.id).primary().cursor(text);
 
                 refs.ranges
                     .iter()
@@ -1188,22 +1192,22 @@ fn goto_reference_impl(cx: &mut Context, direction: Direction) {
         let motion = move |editor: &mut Editor| {
             let (view, doc) = current!(editor);
             let text = doc.text().slice(..);
-            let cursor_pos = doc
-                .selection(view.id)
-                .primary()
-                .cursor(text);
+            let cursor_pos = doc.selection(view.id).primary().cursor(text);
 
             let idx = if let Some(refs) = doc.document_references(view.id) {
                 match direction {
-                    Direction::Forward => {
-                        refs.ranges.iter().position(|r| r.start > cursor_pos)
-                            .unwrap_or(0)
-                    }
-                    Direction::Backward => {
-                        refs.ranges.iter().rev().position(|r| r.end < cursor_pos)
-                            .map(|i| refs.ranges.len() - 1 - i)
-                            .unwrap_or(refs.ranges.len() - 1)
-                    }
+                    Direction::Forward => refs
+                        .ranges
+                        .iter()
+                        .position(|r| r.start > cursor_pos)
+                        .unwrap_or(0),
+                    Direction::Backward => refs
+                        .ranges
+                        .iter()
+                        .rev()
+                        .position(|r| r.end < cursor_pos)
+                        .map(|i| refs.ranges.len() - 1 - i)
+                        .unwrap_or(refs.ranges.len() - 1),
                 }
             } else {
                 return;
@@ -1292,11 +1296,12 @@ fn goto_reference_impl(cx: &mut Context, direction: Direction) {
                         .unwrap_or(false)
                 })
                 .filter_map(|loc| {
-                    lsp_range_to_range(doc.text(), loc.range, offset_encoding)
-                        .map(|r| std::ops::Range {
+                    lsp_range_to_range(doc.text(), loc.range, offset_encoding).map(|r| {
+                        std::ops::Range {
                             start: r.anchor,
                             end: r.head,
-                        })
+                        }
+                    })
                 })
                 .collect();
             char_ranges.sort_by_key(|r| r.start);
@@ -1312,15 +1317,16 @@ fn goto_reference_impl(cx: &mut Context, direction: Direction) {
             let text = doc.text().slice(..);
             let cursor_pos = doc.selection(view.id).primary().cursor(text);
             let idx = match direction {
-                Direction::Forward => {
-                    char_ranges.iter().position(|r| r.start > cursor_pos)
-                        .unwrap_or(0)
-                }
-                Direction::Backward => {
-                    char_ranges.iter().rev().position(|r| r.end < cursor_pos)
-                        .map(|i| char_ranges.len() - 1 - i)
-                        .unwrap_or(char_ranges.len() - 1)
-                }
+                Direction::Forward => char_ranges
+                    .iter()
+                    .position(|r| r.start > cursor_pos)
+                    .unwrap_or(0),
+                Direction::Backward => char_ranges
+                    .iter()
+                    .rev()
+                    .position(|r| r.end < cursor_pos)
+                    .map(|i| char_ranges.len() - 1 - i)
+                    .unwrap_or(char_ranges.len() - 1),
             };
 
             if let Some(range) = char_ranges.get(idx) {

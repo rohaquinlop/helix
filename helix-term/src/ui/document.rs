@@ -7,9 +7,9 @@ use helix_core::syntax::{self, HighlightEvent, Highlighter, OverlayHighlights};
 use helix_core::text_annotations::TextAnnotations;
 use helix_core::{visual_offset_from_block, Position, RopeSlice};
 use helix_stdx::rope::RopeSliceExt;
-use helix_view::editor::{WhitespaceConfig, WhitespaceRenderValue};
+use helix_view::editor::{DimOpacity, WhitespaceConfig, WhitespaceRenderValue};
 use helix_view::graphics::Rect;
-use helix_view::theme::Style;
+use helix_view::theme::{Color, Modifier, Style};
 use helix_view::view::ViewPosition;
 use helix_view::{Document, Theme};
 use tui::buffer::Buffer as Surface;
@@ -36,7 +36,7 @@ pub fn render_document(
     doc_annotations: &TextAnnotations,
     syntax_highlighter: Option<Highlighter<'_>>,
     overlay_highlights: Vec<syntax::OverlayHighlights>,
-    dim_unfocused_text: Option<Style>,
+    dim_unfocused_text: Option<DimStyle>,
     theme: &Theme,
     decorations: DecorationManager,
 ) {
@@ -70,7 +70,7 @@ pub fn render_text(
     text_annotations: &TextAnnotations,
     syntax_highlighter: Option<Highlighter<'_>>,
     overlay_highlights: Vec<syntax::OverlayHighlights>,
-    dim_unfocused_text: Option<Style>,
+    dim_unfocused_text: Option<DimStyle>,
     theme: &Theme,
     mut decorations: DecorationManager,
 ) {
@@ -153,11 +153,12 @@ pub fn render_text(
             }
         } else {
             let overlay_style = overlay_highlighter.style;
-            let syntax_style = if dim_unfocused_text.is_some() && overlay_style == Style::default()
-            {
-                syntax_highlighter
-                    .style
-                    .patch(dim_unfocused_text.expect("checked above"))
+            let syntax_style = if let Some(dim_style) = dim_unfocused_text {
+                if overlay_style == Style::default() {
+                    dim_style.apply(syntax_highlighter.style)
+                } else {
+                    syntax_highlighter.style
+                }
             } else {
                 syntax_highlighter.style
             };
@@ -182,6 +183,44 @@ pub fn render_text(
 
     renderer.draw_indent_guides(last_line_indent_level, last_line_pos.visual_line);
     decorations.render_virtual_lines(renderer, last_line_pos, last_line_end)
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct DimStyle {
+    style: Style,
+    opacity: DimOpacity,
+    background: Option<Color>,
+}
+
+impl DimStyle {
+    pub fn new(style: Style, opacity: DimOpacity, background: Style) -> Self {
+        Self {
+            style,
+            opacity,
+            background: background.bg,
+        }
+    }
+
+    fn apply(self, style: Style) -> Style {
+        let style = style.patch(self.style);
+        match (style.fg, self.background) {
+            (Some(Color::Rgb(r, g, b)), Some(Color::Rgb(bg_r, bg_g, bg_b))) => style.fg(blend_rgb(
+                (r, g, b),
+                (bg_r, bg_g, bg_b),
+                self.opacity.as_fraction(),
+            )),
+            _ if self.opacity.as_fraction() < 1.0 => style.add_modifier(Modifier::DIM),
+            _ => style,
+        }
+    }
+}
+
+fn blend_rgb(foreground: (u8, u8, u8), background: (u8, u8, u8), opacity: f32) -> Color {
+    let blend = |fg, bg| (f32::from(fg) * opacity + f32::from(bg) * (1.0 - opacity)).round() as u8;
+    let (r, g, b) = foreground;
+    let (bg_r, bg_g, bg_b) = background;
+
+    Color::Rgb(blend(r, bg_r), blend(g, bg_g), blend(b, bg_b))
 }
 
 #[derive(Debug)]

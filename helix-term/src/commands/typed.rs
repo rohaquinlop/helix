@@ -1080,9 +1080,16 @@ fn toggle_dim(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
         return Ok(());
     }
 
-    cx.editor.dim_enabled = !cx.editor.dim_enabled;
-    let state = if cx.editor.dim_enabled { "on" } else { "off" };
-    cx.editor.set_status(format!("Dim non-highlighted text: {state}"));
+    if cx.editor.dim_enabled {
+        cx.editor.dim_enabled = false;
+        cx.editor.set_status("Dim non-highlighted text: off");
+    } else if cx.editor.focus_dim_current_document_highlight() {
+        cx.editor
+            .set_status("Dim non-highlighted text: focused symbol");
+    } else {
+        cx.editor
+            .set_status("No read/write document highlight under cursor");
+    }
     Ok(())
 }
 

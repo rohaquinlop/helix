@@ -559,6 +559,15 @@ pub struct LspConfig {
     pub auto_document_highlight: bool,
     /// Dim non-highlighted text while automatic document highlights are active.
     pub dim_non_highlighted: bool,
+    /// Opacity of non-highlighted text while automatic document highlights are active.
+    /// `0.0` blends fully into the background, `1.0` leaves the text unchanged.
+    pub dim_non_highlighted_opacity: DimOpacity,
+    /// Time in milliseconds to wait before clearing dimmed document highlights.
+    #[serde(
+        serialize_with = "serialize_duration_millis",
+        deserialize_with = "deserialize_duration_millis"
+    )]
+    pub dim_non_highlighted_clear_delay: Duration,
     /// Maximum displayed length of inlay hints (excluding the added trailing `…`).
     /// If it's `None`, there's no limit
     pub inlay_hints_length_limit: Option<NonZeroU8>,
@@ -581,11 +590,53 @@ impl Default for LspConfig {
             display_inlay_hints: false,
             auto_document_highlight: true,
             dim_non_highlighted: true,
+            dim_non_highlighted_opacity: DimOpacity::default(),
+            dim_non_highlighted_clear_delay: Duration::from_millis(120),
             inlay_hints_length_limit: None,
             snippets: true,
             goto_reference_include_declaration: true,
             display_color_swatches: true,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DimOpacity(u8);
+
+impl Default for DimOpacity {
+    fn default() -> Self {
+        Self(50)
+    }
+}
+
+impl DimOpacity {
+    pub fn as_fraction(self) -> f32 {
+        f32::from(self.0) / 100.0
+    }
+}
+
+impl Serialize for DimOpacity {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_f32(self.as_fraction())
+    }
+}
+
+impl<'de> Deserialize<'de> for DimOpacity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = f32::deserialize(deserializer)?;
+        if !(0.0..=1.0).contains(&value) {
+            return Err(serde::de::Error::custom(
+                "dim-non-highlighted-opacity must be a number from 0.0 to 1.0",
+            ));
+        }
+
+        Ok(Self((value * 100.0).round() as u8))
     }
 }
 
@@ -1264,7 +1315,7 @@ pub struct Editor {
     pub cursor_cache: CursorCache,
 
     /// Whether to dim non-highlighted text during LSP document highlights.
-    /// Runtime-only toggle, defaults to true.
+    /// Runtime-only focus toggle, defaults to false.
     pub dim_enabled: bool,
 }
 
@@ -1389,8 +1440,21 @@ impl Editor {
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
-            dim_enabled: true,
+            dim_enabled: false,
         }
+    }
+
+    pub fn focus_dim_current_document_highlight(&mut self) -> bool {
+        let view_id = self.tree.focus;
+        let Some(view) = self.tree.try_get(view_id) else {
+            return false;
+        };
+        let Some(doc) = self.documents.get(&view.doc) else {
+            return false;
+        };
+
+        self.dim_enabled = doc.cursor_inside_dim_eligible_document_highlight(view_id);
+        self.dim_enabled
     }
 
     pub fn popup_border(&self) -> bool {
@@ -2518,5 +2582,44 @@ impl CursorCache {
 
     pub fn reset(&self) {
         self.0.set(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DimOpacity;
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    struct DimOpacityConfig {
+        dim_non_highlighted_opacity: DimOpacity,
+    }
+
+    #[test]
+    fn dim_opacity_accepts_fraction_in_range() {
+        let config: DimOpacityConfig = toml::from_str("dim-non-highlighted-opacity = 0.6").unwrap();
+
+        assert_eq!(config.dim_non_highlighted_opacity.0, 60);
+        assert_eq!(config.dim_non_highlighted_opacity.as_fraction(), 0.6);
+    }
+
+    #[test]
+    fn dim_opacity_accepts_range_endpoints() {
+        let transparent: DimOpacityConfig =
+            toml::from_str("dim-non-highlighted-opacity = 0.0").unwrap();
+        let opaque: DimOpacityConfig = toml::from_str("dim-non-highlighted-opacity = 1.0").unwrap();
+
+        assert_eq!(transparent.dim_non_highlighted_opacity.as_fraction(), 0.0);
+        assert_eq!(opaque.dim_non_highlighted_opacity.as_fraction(), 1.0);
+    }
+
+    #[test]
+    fn dim_opacity_rejects_fraction_out_of_range() {
+        let err = toml::from_str::<DimOpacityConfig>("dim-non-highlighted-opacity = 1.1")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("dim-non-highlighted-opacity must be a number from 0.0 to 1.0"));
     }
 }

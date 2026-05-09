@@ -6,7 +6,7 @@ use crate::{
     key,
     keymap::{KeymapResult, Keymaps},
     ui::{
-        document::{render_document, LinePos, TextRenderer},
+        document::{render_document, DimStyle, LinePos, TextRenderer},
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
         Completion, ProgressSpinners,
@@ -205,7 +205,8 @@ impl EditorView {
             inline_diagnostic_config,
             config.end_of_line_diagnostics,
         ));
-        let dim_unfocused_text = Self::document_highlight_dim_style(doc, view, theme, &config, editor.dim_enabled);
+        let dim_unfocused_text =
+            Self::document_highlight_dim_style(doc, view, theme, &config, editor.dim_enabled);
 
         render_document(
             surface,
@@ -498,7 +499,7 @@ impl EditorView {
         theme: &Theme,
         config: &helix_view::editor::Config,
         dim_enabled: bool,
-    ) -> Option<Style> {
+    ) -> Option<DimStyle> {
         if !config.lsp.auto_document_highlight || !config.lsp.dim_non_highlighted || !dim_enabled {
             return None;
         }
@@ -508,8 +509,15 @@ impl EditorView {
         {
             return None;
         }
+        if !doc.document_highlights_dim_eligible(view.id) {
+            return None;
+        }
 
-        Some(theme.get("ui.focus.dim").add_modifier(Modifier::DIM))
+        Some(DimStyle::new(
+            theme.get("ui.focus.dim"),
+            config.lsp.dim_non_highlighted_opacity,
+            theme.get("ui.background"),
+        ))
     }
 
     pub fn doc_document_link_highlights(

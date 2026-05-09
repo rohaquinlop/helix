@@ -167,6 +167,9 @@ The following statusline elements can be configured:
 | `display-progress-messages` | Display LSP progress messages below statusline[^1]    | `false` |
 | `auto-signature-help` | Enable automatic popup of signature help (parameter hints)  | `true`  |
 | `auto-document-highlight` | Automatically highlight symbol references at the cursor | `false` |
+| `dim-non-highlighted` | Dim non-highlighted text when the dim command focuses a read/write document highlight | `true` |
+| `dim-non-highlighted-opacity` | Opacity of non-highlighted text while automatic document highlights are active, from `0.0` (hidden) to `1.0` (unchanged) | `0.5` |
+| `dim-non-highlighted-clear-delay` | Time in milliseconds to wait before clearing dimmed document highlights | `120` |
 | `display-inlay-hints` | Display inlay hints[^2]                                     | `false` |
 | `inlay-hints-length-limit` | Maximum displayed length (non-zero number) of inlay hints | Unset by default  |
 | `display-color-swatches` | Show color swatches next to colors | `true` |

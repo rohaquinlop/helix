@@ -240,6 +240,7 @@ pub struct DocumentColorSwatches {
 #[derive(Debug, Clone, Default)]
 pub struct DocumentHighlights {
     pub ranges: Vec<std::ops::Range<usize>>,
+    pub dim_eligible: bool,
 }
 
 /// Cached LSP reference locations for navigation within the current function scope.
@@ -2383,12 +2384,18 @@ impl Document {
         &mut self,
         view_id: ViewId,
         ranges: Vec<std::ops::Range<usize>>,
+        dim_eligible: bool,
     ) {
         if ranges.is_empty() {
             self.document_highlights.remove(&view_id);
         } else {
-            self.document_highlights
-                .insert(view_id, DocumentHighlights { ranges });
+            self.document_highlights.insert(
+                view_id,
+                DocumentHighlights {
+                    ranges,
+                    dim_eligible,
+                },
+            );
         }
     }
 
@@ -2407,6 +2414,23 @@ impl Document {
             .map(|highlights| highlights.ranges.as_slice())
     }
 
+    pub fn document_highlights_dim_eligible(&self, view_id: ViewId) -> bool {
+        self.document_highlights
+            .get(&view_id)
+            .is_some_and(|highlights| highlights.dim_eligible)
+    }
+
+    pub fn cursor_inside_dim_eligible_document_highlight(&self, view_id: ViewId) -> bool {
+        if !self.document_highlights_dim_eligible(view_id) {
+            return false;
+        }
+
+        let text = self.text().slice(..);
+        let cursor = self.selection(view_id).primary().cursor(text);
+        self.document_highlights(view_id)
+            .is_some_and(|ranges| ranges.iter().any(|range| range.contains(&cursor)))
+    }
+
     pub fn document_highlight_controller(&mut self, view_id: ViewId) -> &mut TaskController {
         self.document_highlight_controllers
             .entry(view_id)
@@ -2421,10 +2445,8 @@ impl Document {
         if ranges.is_empty() {
             self.document_references.remove(&view_id);
         } else {
-            self.document_references.insert(
-                view_id,
-                DocumentReferences { ranges, index: 0 },
-            );
+            self.document_references
+                .insert(view_id, DocumentReferences { ranges, index: 0 });
         }
     }
 

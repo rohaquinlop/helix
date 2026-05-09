@@ -9,12 +9,21 @@ use helix_view::{
     handlers::Handlers,
     DocumentId, Editor, ViewId,
 };
+use tokio::time::{sleep, Duration};
 
 use crate::job;
 
 fn request_document_highlights(editor: &mut Editor, doc_id: DocumentId, view_id: ViewId) {
     if !editor.config().lsp.auto_document_highlight {
         return;
+    }
+
+    if editor.dim_enabled
+        && editor
+            .document(doc_id)
+            .is_none_or(|doc| !doc.cursor_inside_dim_eligible_document_highlight(view_id))
+    {
+        editor.dim_enabled = false;
     }
 
     let Some(doc) = editor.document_mut(doc_id) else {
@@ -42,6 +51,11 @@ fn request_document_highlights(editor: &mut Editor, doc_id: DocumentId, view_id:
 
     let text = doc.text().clone();
     let cancel = doc.document_highlight_controller(view_id).restart();
+    let clear_delay = if editor.dim_enabled && editor.config().lsp.dim_non_highlighted {
+        editor.config().lsp.dim_non_highlighted_clear_delay
+    } else {
+        Duration::ZERO
+    };
 
     tokio::spawn(async move {
         let response = match cancelable_future(future, &cancel).await {
@@ -53,23 +67,45 @@ fn request_document_highlights(editor: &mut Editor, doc_id: DocumentId, view_id:
             None => return,
         };
 
-        let ranges = response
+        let highlights = response
             .map(|highlights| document_highlight_ranges(&text, offset_encoding, highlights))
             .unwrap_or_default();
+        let ranges_empty = highlights.ranges.is_empty();
+
+        if ranges_empty && !clear_delay.is_zero() {
+            if cancelable_future(sleep(clear_delay), &cancel)
+                .await
+                .is_none()
+            {
+                return;
+            }
+        }
 
         job::dispatch(move |editor, _| {
-            apply_document_highlights(editor, doc_id, view_id, ranges);
+            apply_document_highlights(editor, doc_id, view_id, highlights);
         })
         .await;
     });
+}
+
+#[derive(Default)]
+struct DocumentHighlightRanges {
+    ranges: Vec<std::ops::Range<usize>>,
+    dim_eligible: bool,
 }
 
 fn document_highlight_ranges(
     text: &helix_core::Rope,
     offset_encoding: OffsetEncoding,
     highlights: Vec<lsp::DocumentHighlight>,
-) -> Vec<std::ops::Range<usize>> {
+) -> DocumentHighlightRanges {
     let slice = text.slice(..);
+    let dim_eligible = highlights.iter().any(|highlight| {
+        matches!(
+            highlight.kind,
+            Some(lsp::DocumentHighlightKind::READ | lsp::DocumentHighlightKind::WRITE)
+        )
+    });
     let mut ranges: Vec<_> = highlights
         .into_iter()
         .filter_map(|highlight| lsp_range_to_range(text, highlight.range, offset_encoding))
@@ -96,14 +132,17 @@ fn document_highlight_ranges(
         merged.push(range);
     }
 
-    merged
+    DocumentHighlightRanges {
+        ranges: merged,
+        dim_eligible,
+    }
 }
 
 fn apply_document_highlights(
     editor: &mut Editor,
     doc_id: DocumentId,
     view_id: ViewId,
-    ranges: Vec<std::ops::Range<usize>>,
+    highlights: DocumentHighlightRanges,
 ) {
     if !editor.config().lsp.auto_document_highlight {
         return;
@@ -118,12 +157,12 @@ fn apply_document_highlights(
         return;
     }
 
-    if ranges.is_empty() {
+    if highlights.ranges.is_empty() {
         doc.clear_document_highlights(view_id);
         return;
     }
 
-    doc.set_document_highlights(view_id, ranges);
+    doc.set_document_highlights(view_id, highlights.ranges, highlights.dim_eligible);
 }
 
 pub(super) fn register_hooks(_handlers: &Handlers) {
